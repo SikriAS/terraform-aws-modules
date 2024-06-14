@@ -1,0 +1,6 @@
+[submodule "terraform-aws-ecr"]
+	path = terraform-aws-ecr
+	url = ./terraform-aws-ecr
+[submodule "terraform-aws-ecs-service"]
+	path = terraform-aws-ecs-service
+	url = ./terraform-aws-ecs-service

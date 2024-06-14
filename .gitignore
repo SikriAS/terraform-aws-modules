@@ -1,0 +1,8 @@
+# JetBrains
+.idea/
+
+# Terraform
+**/*/.terraform/
+*.tfstate
+*.tfstate.backup
+*.lock.hcl
