@@ -563,12 +563,6 @@ resource "aws_ecs_task_definition" "task_datadog" {
           dd_service = var.application_name,
           dd_tags    = "env:${var.environment},version:${split(":", var.application_container.image)[1]},team:samsvar",
         }
-        secretOptions = [
-          {
-            name      = "apiKey",
-            valueFrom = var.datadog_api_key
-          }
-        ]
       }
 
       healthCheck       = container.health_check
