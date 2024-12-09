@@ -1,13 +1,3 @@
-output "service_id" {
-  description = "The ARN of the created service"
-  value       = var.autoscaling == null ? aws_ecs_service.service[0].id : aws_ecs_service.service_with_autoscaling[0].id
-}
-
-output "service_name" {
-  description = "The name of the created service"
-  value       = var.autoscaling == null ? aws_ecs_service.service[0].name : aws_ecs_service.service_with_autoscaling[0].name
-}
-
 output "task_role_name" {
   description = "The name of the task role"
   value       = aws_iam_role.task.name
