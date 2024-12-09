@@ -58,18 +58,6 @@ data "aws_iam_policy_document" "task_execution_permissions" {
       "logs:PutLogEvents",
     ]
   }
-
-  statement {
-    effect = "Allow"
-
-    actions = [
-      "secretsmanager:GetSecretValue",
-    ]
-
-    resources = [
-      data.aws_secretsmanager_secret.datadog_agent_api_key_secret.arn,
-    ]
-  }
 }
 
 /*
