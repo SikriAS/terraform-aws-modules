@@ -280,12 +280,6 @@ variable "datadog_agent_api_key_secret_arn" {
   default     = null
 }
 
-variable "datadog_instrumentation_language" {
-  description = "Should we autoinstrument the service?"
-  type        = string
-  default     = null
-}
-
 variable "xray_daemon" {
   description = "Should a OpenTelemetry Collector for X-Ray be attached to the service?"
   type        = bool
