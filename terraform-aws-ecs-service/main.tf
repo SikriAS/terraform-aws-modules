@@ -506,19 +506,6 @@ resource "aws_ecs_task_definition" "task_datadog" {
         }
       ]
 
-      logConfiguration = {
-        logDriver = "awsfirelens",
-        options = {
-          Name       = "datadog",
-          Host       = "http-intake.logs.datadoghq.eu",
-          compress   = "gzip",
-          TLS        = "on"
-          provider   = "ecs"
-          dd_service = var.application_name,
-          dd_tags    = "env:${var.environment},version:${split(":", var.application_container.image)[1]},team:samsvar",
-        }
-      }
-
       healthCheck       = container.health_check
       cpu               = container.cpu
       memory            = container.memory_hard_limit
