@@ -365,16 +365,6 @@ locals {
   application_container = var.datadog_agent == true ? merge(var.application_container,
     {
       extra_options = {
-        dependsOn = [
-          {
-            containerName = "datadog-agent",
-            condition     = "HEALTY"
-          },
-          {
-            containerName = "cws-instrumentation-init",
-            condition     = "SUCCESS"
-          }
-        ]
         mountPoints = [
           {
             sourceVolume  = "cws-instrumentation-volume",
