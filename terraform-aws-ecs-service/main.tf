@@ -547,3 +547,251 @@ resource "terraform_data" "no_launch_type_and_spot" {
     }
   }
 }
+
+
+# When autoscaling is enabled, we have to ignore changes to the desired count.
+# This is because the autoscaling group will manage the desired count.
+# If terraform apply is run, then the desired count will be reset.
+#
+# Having two resources allows us to have some users with autoscaling and some
+# using desired count.
+
+resource "aws_ecs_service" "service" {
+  count      = var.autoscaling == null ? 1 : 0
+  depends_on = [terraform_data.no_launch_type_and_spot]
+
+  name                               = var.application_name
+  cluster                            = var.cluster_id
+  task_definition                    = local.task_definition
+  desired_count                      = var.desired_count
+  launch_type                        = var.use_spot ? null : var.launch_type
+  deployment_minimum_healthy_percent = var.deployment_minimum_healthy_percent
+  deployment_maximum_percent         = var.deployment_maximum_percent
+  health_check_grace_period_seconds  = var.launch_type == "EXTERNAL" ? null : var.health_check_grace_period_seconds
+  wait_for_steady_state              = var.wait_for_steady_state
+  propagate_tags                     = var.propagate_tags
+  enable_execute_command             = var.enable_execute_command
+
+  # ECS Anywhere doesn't support VPC networking or load balancers.
+  # Because of this, we need to make these resources dynamic!
+  dynamic "network_configuration" {
+    for_each = var.launch_type == "EXTERNAL" ? [] : [0]
+
+    content {
+      subnets          = var.private_subnet_ids
+      security_groups  = [aws_security_group.ecs_service[0].id]
+      assign_public_ip = var.assign_public_ip
+    }
+  }
+
+  dynamic "load_balancer" {
+    for_each = var.launch_type == "EXTERNAL" ? [] : var.lb_listeners
+
+    content {
+      container_name   = var.application_container.name
+      container_port   = var.application_container.port
+      target_group_arn = aws_lb_target_group.service[load_balancer.key].arn
+    }
+  }
+
+  # We set the service as a spot service through setting up the capacity_provider_strategy.
+  # Requires a cluster with 'FARGATE_SPOT' capacity provider enabled.
+  dynamic "capacity_provider_strategy" {
+    for_each = var.use_spot ? [local.capacity_provider_strategy] : []
+
+    content {
+      capacity_provider = capacity_provider_strategy.value.capacity_provider
+      weight            = capacity_provider_strategy.value.weight
+    }
+  }
+
+  timeouts {
+    create = var.ecs_service_timeouts.create
+    update = var.ecs_service_timeouts.update
+    delete = var.ecs_service_timeouts.delete
+  }
+}
+
+resource "aws_ecs_service" "service_with_autoscaling" {
+  count      = var.autoscaling != null ? 1 : 0
+  depends_on = [terraform_data.no_launch_type_and_spot]
+
+  name                               = var.application_name
+  cluster                            = var.cluster_id
+  task_definition                    = local.task_definition
+  desired_count                      = var.desired_count
+  launch_type                        = var.use_spot ? null : var.launch_type
+  deployment_minimum_healthy_percent = var.deployment_minimum_healthy_percent
+  deployment_maximum_percent         = var.deployment_maximum_percent
+  health_check_grace_period_seconds  = var.launch_type == "EXTERNAL" ? null : var.health_check_grace_period_seconds
+  wait_for_steady_state              = var.wait_for_steady_state
+  propagate_tags                     = var.propagate_tags
+  enable_execute_command             = var.enable_execute_command
+
+  # ECS Anywhere doesn't support VPC networking or load balancers.
+  # Because of this, we need to make these resources dynamic!
+
+  dynamic "network_configuration" {
+    for_each = var.launch_type == "EXTERNAL" ? [] : [0]
+
+    content {
+      subnets          = var.private_subnet_ids
+      security_groups  = [aws_security_group.ecs_service[0].id]
+      assign_public_ip = var.assign_public_ip
+    }
+  }
+
+  dynamic "load_balancer" {
+    for_each = var.launch_type == "EXTERNAL" ? [] : var.lb_listeners
+
+    content {
+      container_name   = var.application_container.name
+      container_port   = var.application_container.port
+      target_group_arn = aws_lb_target_group.service[load_balancer.key].arn
+    }
+  }
+
+  # We set the service as a spot service through setting up the capacity_provider_strategy.
+  # Requires a cluster with 'FARGATE_SPOT' capacity provider enabled.
+  dynamic "capacity_provider_strategy" {
+    for_each = var.use_spot ? [local.capacity_provider_strategy] : []
+
+    content {
+      capacity_provider = capacity_provider_strategy.value.capacity_provider
+      weight            = capacity_provider_strategy.value.weight
+    }
+  }
+
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
+  timeouts {
+    create = var.ecs_service_timeouts.create
+    update = var.ecs_service_timeouts.update
+    delete = var.ecs_service_timeouts.delete
+  }
+}
+
+/*
+ * = Autoscaling
+ */
+locals {
+  # The Cluster ID is the cluster's ARN.
+  # The last part after a '/'is the name of the cluster.
+  cluster_name = split("/", var.cluster_id)[1]
+
+  autoscaling = var.autoscaling != null ? var.autoscaling : {
+    min_capacity = var.desired_count
+    max_capacity = var.desired_count
+    metric_type  = "ECSServiceAverageCPUUtilization"
+    target_value = "75"
+  }
+}
+
+resource "aws_appautoscaling_target" "ecs_service" {
+  count = var.autoscaling != null ? 1 : 0
+
+  resource_id = "service/${local.cluster_name}/${aws_ecs_service.service_with_autoscaling[0].name}"
+
+  service_namespace  = "ecs"
+  scalable_dimension = "ecs:service:DesiredCount"
+
+  min_capacity = local.autoscaling.min_capacity
+  max_capacity = local.autoscaling.max_capacity
+}
+
+resource "aws_appautoscaling_policy" "ecs_service" {
+  count = var.autoscaling != null ? 1 : 0
+
+  name = "${var.application_name}-automatic-scaling"
+  # Step Scaling is also available, but it's explicitly not recommended by the AWS docs.
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.ecs_service[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs_service[0].scalable_dimension
+  service_namespace  = aws_appautoscaling_target.ecs_service[0].service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    dynamic "predefined_metric_specification" {
+      for_each = length(var.custom_metrics) > 0 ? [] : [1]
+      content {
+        predefined_metric_type = local.autoscaling.metric_type
+        resource_label         = var.autoscaling_resource_label
+      }
+    }
+
+    dynamic "customized_metric_specification" {
+      for_each = length(var.custom_metrics) > 0 ? [1] : []
+      content {
+        dynamic "metrics" {
+          for_each = var.custom_metrics
+          content {
+            label = metrics.value.label
+            id    = metrics.value.id
+            dynamic "metric_stat" {
+              for_each = metrics.value.metric_stat[*]
+              content {
+                metric {
+                  metric_name = metric_stat.value.metric.metric_name
+                  namespace   = metric_stat.value.metric.namespace
+                  dynamic "dimensions" {
+                    for_each = metric_stat.value.metric.dimensions
+                    content {
+                      name  = dimensions.value.name
+                      value = dimensions.value.value
+                    }
+                  }
+                }
+                stat = metric_stat.value.stat
+              }
+            }
+            expression  = metrics.value.expression
+            return_data = metrics.value.return_data
+          }
+        }
+      }
+    }
+
+    target_value       = coalesce(var.autoscaling.target_value, local.autoscaling.target_value)
+    scale_in_cooldown  = var.autoscaling.scale_in_cooldown
+    scale_out_cooldown = var.autoscaling.scale_out_cooldown
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !(var.autoscaling_resource_label != "" && length(var.custom_metrics) > 0)
+      error_message = "Cannot define autoscaling resource label and custom metrics at the same time"
+    }
+  }
+}
+
+# There is an issue with the AWS provider when it comes to creating multiple
+# autoscaling groups. This makes the creation of any n+1 scheduled action
+# fail on first create, which in turn requires multiple runs of apply.
+#
+# For more information, check out this issue on GitHub:
+# https://github.com/hashicorp/terraform-provider-aws/issues/17915
+resource "aws_appautoscaling_scheduled_action" "ecs_service" {
+  for_each = {
+    for v in var.autoscaling_schedule.schedules : v.schedule => v
+    if var.autoscaling != null
+  }
+
+  name        = "${var.application_name}-scheduled-scaling"
+  resource_id = aws_appautoscaling_target.ecs_service[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs_service[
+    0
+  ].scalable_dimension
+  service_namespace = aws_appautoscaling_target.ecs_service[
+    0
+  ].service_namespace
+
+  timezone = var.autoscaling_schedule.timezone
+  schedule = each.value.schedule
+
+  scalable_target_action {
+    min_capacity = each.value.min_capacity
+    max_capacity = each.value.max_capacity
+  }
+}
