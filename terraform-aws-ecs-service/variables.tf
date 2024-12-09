@@ -274,8 +274,8 @@ variable "datadog_agent" {
   default     = false
 }
 
-variable "datadog_agent_api_key_secret_arn" {
-  description = "The arn for the Datadog API key to use for the agent."
+variable "datadog_api_key" {
+  description = "The Datadog API key to use for the agent."
   type        = string
   default     = null
 }

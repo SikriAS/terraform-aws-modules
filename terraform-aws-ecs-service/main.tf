@@ -342,13 +342,6 @@ resource "aws_lb_listener_rule" "service" {
  *
  * This is what users are here for
  */
-data "aws_secretsmanager_secret" "datadog_agent_api_key_secret" {
-  arn = var.datadog_agent_api_key_secret_arn
-}
-
-data "aws_secretsmanager_secret_version" "datadog_agent_api_key" {
-  secret_id = data.aws_secretsmanager_secret.datadog_agent_api_key_secret.id
-}
 
 locals {
   xray_container = var.xray_daemon == true ? [
@@ -371,6 +364,7 @@ locals {
         DD_SITE                                     = "datadoghq.eu"
         DD_RUNTIME_SECURITY_CONFIG_ENABLED          = "true"
         DD_RUNTIME_SECURITY_CONFIG_EBPFLESS_ENABLED = "true"
+        DD_API_KEY = var.datadog_api_key
 
         DD_SERVICE                = var.application_name
         DD_TAGS                   = "team:samsvar"
@@ -380,9 +374,6 @@ locals {
         DD_APM_FILTER_TAGS_REGEX_REJECT = "http.url:.*\\/health$"
 
         DD_TRACE_REMOVE_INTEGRATION_SERVICE_NAMES_ENABLED = "true"
-      }
-      secrets = {
-        DD_API_KEY = data.aws_secretsmanager_secret_version.datadog_agent_api_key.secret_string
       }
       health_check = {
         command     = ["CMD-SHELL", "/probe.sh"]
@@ -587,7 +578,7 @@ resource "aws_ecs_task_definition" "task_datadog" {
         secretOptions = [
           {
             name      = "apiKey",
-            valueFrom = data.aws_secretsmanager_secret_version.datadog_agent_api_key.secret_string
+            valueFrom = var.datadog_api_key
           }
         ]
       }
